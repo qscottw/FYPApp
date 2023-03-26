@@ -28,17 +28,36 @@ import org.opencv.core.Point
 import org.opencv.core.Scalar
 import org.opencv.core.Size
 import org.opencv.imgproc.Imgproc
-import org.opencv.imgproc.Imgproc.FONT_HERSHEY_SIMPLEX
+import org.opencv.imgproc.Imgproc.FONT_HERSHEY_PLAIN
 import org.tensorflow.lite.DataType
+import org.tensorflow.lite.support.image.ImageProcessor
 import org.tensorflow.lite.support.image.TensorImage
+//import org.tensorflow.lite.support.image.ops.Rot90Op
+import org.tensorflow.lite.support.common.ops.NormalizeOp
+
 import org.tensorflow.lite.support.tensorbuffer.TensorBufferFloat
 import java.io.FileInputStream
 import java.io.IOException
+import java.lang.Double
 import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
+import java.util.*
 import java.util.concurrent.Executor
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import kotlin.Array
+import kotlin.Boolean
+import kotlin.Exception
+import kotlin.Int
+import kotlin.IntArray
+import kotlin.Long
+import kotlin.String
+import kotlin.Throws
+import kotlin.also
+import kotlin.apply
+import kotlin.arrayOf
+import kotlin.let
+import kotlin.math.max
 
 
 class MainActivity : AppCompatActivity(), ImageAnalysis.Analyzer {
@@ -48,7 +67,8 @@ class MainActivity : AppCompatActivity(), ImageAnalysis.Analyzer {
     //private lateinit var tflite: InterpreterApi
     private lateinit var facemaskmodel : MaskClassificationModel
         //.newInstance(context)
-    private var classNames = arrayOf("Incorrectly Worn Mask", "Without Mask", "With Mask")
+    private var classNames = arrayOf("Incorrectly Worn Mask", "With Mask", "Without Mask")
+    private var classColors = arrayOf(Scalar(255.0, 255.0, 0.0), Scalar(0.0, 255.0, 0.0),  Scalar(255.0, 0.0, 0.0))
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         viewBinding = ActivityMainBinding.inflate(layoutInflater)
@@ -130,6 +150,7 @@ class MainActivity : AppCompatActivity(), ImageAnalysis.Analyzer {
         val TEXT_SIZE = 4.0
         val SIZE = Size(50.0, 50.0)
         //initialize an array of face
+        val imageProcessor = ImageProcessor.Builder().add(NormalizeOp(0.0f, 225.0f)).build()
 
         for (face in facesArray) {
             //steps to crop the bitmap for inference
@@ -139,23 +160,30 @@ class MainActivity : AppCompatActivity(), ImageAnalysis.Analyzer {
             val width = face.faceRect.width
             val xmin = x
             val ymin = y
-            val croppedFaceBitmap = Bitmap.createBitmap(bmp, xmin, ymin, width, height)
+            val croppedFaceBitmap = Bitmap.createBitmap(bmp, max(0,xmin), max(0, ymin), width, height)
             val resizedCroppedFaceBitmap = Bitmap.createScaledBitmap(croppedFaceBitmap, 224, 224, false)
             // convert cropped and resized bitmap to tfbuffer
             if (resizedCroppedFaceBitmap !== null){
-                val tfImage = TensorImage.fromBitmap(resizedCroppedFaceBitmap)
-                val tensorBuffer = tfImage.tensorBuffer
+//                val tensorImage = TensorImage(DataType.UINT8)
+//                tensorImage.load(resizedCroppedFaceBitmap)
+//                val tensorImageBuffer = tensorImage.tensorBuffer
+
+//                val tfImage = TensorImage.fromBitmap(resizedCroppedFaceBitmap)
+//                val tensorBuffer = tfImage.tensorBuffer
+                val tensorImage = imageProcessor.process(TensorImage.fromBitmap(resizedCroppedFaceBitmap))
+                val tensorBuffer = tensorImage.tensorBuffer
                 val tensorBufferFloat = TensorBufferFloat.createFrom(tensorBuffer, DataType.FLOAT32)
                 val outputs = facemaskmodel.process(tensorBufferFloat)
                 outputs::class.simpleName?.let { Log.d("Type of output", it) }
                 val outputArray = outputs.outputFeature0AsTensorBuffer.floatArray
-                Log.d("no tag", "just debug")
                 val maxIdx = outputArray.indices.maxByOrNull { outputArray[it] } ?: -1
                 val className = classNames[maxIdx]
-                val text_pos = Point(face.faceRect.x.toDouble() - FACE_RECT_THICKNESS,face.faceRect.y - FACE_RECT_THICKNESS.toDouble())
-                Imgproc.putText(mat, className, text_pos, FONT_HERSHEY_SIMPLEX, TEXT_SIZE,FACE_RECT_COLOR)
+                val textRectColor = classColors[maxIdx]
+                val text_pos = Point(Double.max(0.0, face.faceRect.x.toDouble() - FACE_RECT_THICKNESS), Double.max(0.0, face.faceRect.y - FACE_RECT_THICKNESS.toDouble()))
+                Imgproc.putText(mat, className, text_pos, FONT_HERSHEY_PLAIN, TEXT_SIZE,textRectColor)
+                Imgproc.rectangle(mat, face.faceRect, textRectColor, FACE_RECT_THICKNESS)
+
             }
-            Imgproc.rectangle(mat, face.faceRect, FACE_RECT_COLOR, FACE_RECT_THICKNESS)
         }
         val bmp2 = bmp.copy(bmp.config, true)
         Utils.matToBitmap(mat, bmp2)
